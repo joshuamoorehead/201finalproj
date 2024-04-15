@@ -17,7 +17,7 @@ AnalogIn Mic(PA_0, PullDown); //CN8/A0
 AnalogOut Speaker(PA_4);
 //AnalogOut Speaker(PA_1);
 
-InterruptIn LED_Reset(PA_8, PullDown); //CN5/D4
+InterruptIn RECORD_BUTTON(PA_8, PullDown); //CN5/D4 
 InterruptIn Play(PA_9, PullDown); //CN5/D4
 InterruptIn Graph(PC_4, PullDown);
 
@@ -42,6 +42,12 @@ float AvgVolume = 0;
 float TotalVolume = 0;
 unsigned long long VolumeIndex = 0;
 
+const int LONGPRESS_TIME = 300;
+bool longPress = false;
+bool shortPress = false;
+
+bool releaseStop = false;
+bool pressStop = false;
 
 void GetAvgVolume (void) {
     TotalVolume = TotalVolume + Volume;
@@ -138,11 +144,42 @@ void Record(void) {
             //     break;
             //     }
             // }
+
+            if (releaseStop || pressStop) {
+                releaseStop = false;
+                pressStop = false;
+                break;
+            }
+         
             Audio.push_back(Volume);
             //sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
         }
+    }
+}
+
+void RecordRise (void) {
+    millisLast = Kernel::get_ms_count();
+    
+    while (RECORD_BUTTON.read() == 1) {
+        millisCurrent = Kernel::get_ms_count();
+        millisElapsed = millisCurrent - millisLast;
+        if (millisElapsed > LONGPRESS_TIME) {
+            longPress = true;
+            Record();
+            return;
+        }
+    }
+
+    shortPress = true;
+    Record();
+}
+
+void RecordFall (void) {
+    if (longPress) {
+        releaseStop = true;
+        longPress = false;
     }
 }
 
@@ -154,6 +191,9 @@ int main(void)
 
     Play.rise(event_queue.event(&PlayBack));
     Graph.rise(event_queue.event(&Draw));
+
+ RECORD_BUTTON.rise(event_queue.event(&RecordRise));
+ RECORD_BUTTON.fall(event_queue.event(&RecordFall));
  
  while(true) {
      Speaker = 0;
