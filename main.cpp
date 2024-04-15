@@ -59,8 +59,8 @@ float SpeedSensor;
 float SpeedValue;
 
 void GetGain (void) {
-    GainSensor = Gain.read();
-    if (GainSensor > 2) {
+    GainSensor = Gain.read()/2;
+    if (GainSensor > 1) {
         GainValue = 1 + GainSensor;
     } else {
         GainValue = 1 - GainSensor;
@@ -68,11 +68,11 @@ void GetGain (void) {
 }
 
 void GetSpeed (void) {
-        SpeedSensor = Speed.read();
-    if (SpeedSensor > 2) {
-        SpeedValue = 1 + SpeedSensor;
-    } else {
+        SpeedSensor = Speed.read()/2;
+    if (SpeedSensor > 1) {
         SpeedValue = 1 - SpeedSensor;
+    } else {
+        SpeedValue = 1 + SpeedSensor;
     }
 }
 
@@ -155,7 +155,7 @@ void Record(void) {
         millisCurrentRec = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
         millisElapsedRec = millisCurrentRec - millisLastRec;
-        if (millisElapsed >= 10) {
+        if (millisElapsed >= 10*SpeedValue) {
             GetVolume();
 
             // if (Volume >= AvgVolume + 0.8)
