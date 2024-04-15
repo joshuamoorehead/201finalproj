@@ -14,6 +14,9 @@
 #include <vector>
  
 AnalogIn Mic(PA_0, PullDown); //CN8/A0
+AnalogIn Gain(PA_1, PullDown); //CN8/A1 
+AnalogIn Speed(PC_1, PullDown); //CN8/A4
+
 AnalogOut Speaker(PA_4);
 //AnalogOut Speaker(PA_1);
 
