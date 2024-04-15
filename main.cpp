@@ -49,6 +49,30 @@ bool shortPress = false;
 bool releaseStop = false;
 bool pressStop = false;
 
+float GainSensor;
+float GainValue;
+
+float SpeedSensor;
+float SpeedValue;
+
+void GetGain (void) {
+    GainSensor = Gain.read();
+    if (GainSensor > 2) {
+        GainValue = 1 + GainSensor;
+    } else {
+        GainValue = 1 - GainSensor;
+    }
+}
+
+void GetSpeed (void) {
+        SpeedSensor = Speed.read();
+    if (SpeedSensor > 2) {
+        SpeedValue = 1 + SpeedSensor;
+    } else {
+        SpeedValue = 1 - SpeedSensor;
+    }
+}
+
 void GetAvgVolume (void) {
     TotalVolume = TotalVolume + Volume;
     VolumeIndex++;
