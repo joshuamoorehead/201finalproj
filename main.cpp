@@ -175,7 +175,7 @@ void Record(void) {
                 break;
             }
          
-            Audio.push_back(Volume);
+            Audio.push_back(Volume*GainValue);
             //sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
