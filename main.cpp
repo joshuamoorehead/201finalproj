@@ -11,24 +11,25 @@
 #include "mbed.h"
 #include <cstdio>
 #include <iostream>
+#include <type_traits>
 #include <vector>
  
-AnalogIn Mic(PA_0, PullDown); //CN8/A0
-AnalogIn Gain(PA_1, PullDown); //CN8/A1 
-AnalogIn Speed(PC_1, PullDown); //CN8/A4
+AnalogIn Mic(PA_0); //CN8/A0
+AnalogIn Gain(PA_1); //CN8/A1 
+AnalogIn Speed(PC_1); //CN8/A4
 
 AnalogOut Speaker(PA_4);
 //AnalogOut Speaker(PA_1);
 
-InterruptIn RECORD_BUTTON(PA_8, PullDown); //CN5/D4 
-InterruptIn Play(PA_9, PullDown); //CN5/D4
-InterruptIn Graph(PC_4, PullDown);
+DigitalIn RECORD_BUTTON(PA_8); //CN5/D7
+InterruptIn Play(PA_9); //CN5/D4
+InterruptIn Graph(PC_4);
 
 DigitalOut OUTPUT(PB_4); //CN9/D5
 DigitalOut Recording(PB_5);
 DigitalOut Error(PA_10);
  
-#define Vsupply 5.0f //microcontroller voltage supply 3.3V
+#define Vsupply 3.3f //microcontroller voltage supply 3.3V
 const int SAMPLE_TIME = 200;
 unsigned long millisCurrent;
 unsigned long millisLast = 0;
@@ -45,18 +46,17 @@ float AvgVolume = 0;
 float TotalVolume = 0;
 unsigned long long VolumeIndex = 0;
 
-const int LONGPRESS_TIME = 300;
-bool longPress = false;
-bool shortPress = false;
-
-bool releaseStop = false;
-bool pressStop = false;
+bool released = true;
+const int LONGPRESS_TIME = 2000;
 
 float GainSensor;
 float GainValue;
 
 float SpeedSensor;
 float SpeedValue;
+
+EventQueue event_queue;
+Thread event_thread(osPriorityNormal);
 
 void GetGain (void) {
     GainSensor = Gain.read()/2;
@@ -83,7 +83,7 @@ void GetAvgVolume (void) {
 }
 
 void GetVolume(void) {
-    Volume = (1-Mic.read()) * 5;
+    Volume = Mic.read() * Vsupply;
     GetAvgVolume();
 }
 
@@ -108,54 +108,61 @@ void PlayBack(void) {
 }
 
 
-int Draw() {
-    const int graph_width = 100; // Width of the graph
-    const int num_points = 500;  // Number of points on the graph
-    const int max_value = 200;   // Maximum value on the graph
-
-    // Generate some example data
-
-    double phase = 0.0;
-
-    while (true) {
-        std::cout << "\x1B[2J\x1B[H"; // ANSI escape codes for clearing the screen and moving the cursor to the top-left corner
-
-        // Print the graph
-        for (int y = max_value; y >= 0; --y) {
-            for (int x = 0; x < num_points; ++x) {
-                char c = ' ';
-                if (std::round(Audio[x]*100) == y) {
-                    c = '*';
-                }
-                std::cout << c;
-            }
-            std::cout << std::endl;
-        }
-
-        millisCurrent = Kernel::get_ms_count();
-        millisLast = Kernel::get_ms_count();
-        millisElapsed = millisCurrent - millisLast;
-        while(millisElapsed < 10){
-            millisCurrent = Kernel::get_ms_count();
-        }
-       
-        phase += 0.1;
+void Draw() {
+    if(Audio.size() == 0){
+        Error = 1;
+        cout << "No Audio Recording" << endl;
+        return;
     }
 
-    return 0;
+    Error = 0;
+    vector<float> avg;
+    const int width = 225;
+    const int height = 50;
+
+    double sum = 0;
+    double total = 0;
+
+    vector<vector<char>> graph(height, vector<char>(width));
+    for (int i = 0; i < height; ++i) {
+        for (int j = 0; j < width; ++j) {
+            graph[i][j] = ' ';
+        }
+    }
+    avg.clear();
+    for(int i = 0; i < 4500; i += 20){
+        total = 0;
+        for (int j = i; j < (i+20); j++) {
+            total = total + Audio[j];
+        }
+        avg.push_back(floor((total/20)*10));
+    }
+    cout << avg.size() << endl;
+    for(int i =0; i < avg.size(); i ++){
+        if((50 - avg[i] - 2) < 50 && avg[i] - 5 > 0){
+            graph[50 - (avg[i] - 2)][i] = '*';
+        }
+    }
+    std::cout << "\033[2J\033[H";
+    for(int i = 0; i < height; i++){ // Use height as the upper limit
+    for(int j = 0; j < width; j++){
+        std::cout << graph[i][j];
+    }
+    std::cout << std::endl;
+    }
 }
 
+void LongPressRecord(void) {
 
-void Record(void) {
     cout << "Recording" << endl;
     int i = 0;
     Audio.clear();
-    while (i < 500) {
+    while (i < 4500) {
         millisCurrent = Kernel::get_ms_count();
         millisCurrentRec = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
         millisElapsedRec = millisCurrentRec - millisLastRec;
-        if (millisElapsed >= 10*SpeedValue) {
+        if (millisElapsed >= 1) {
             GetVolume();
 
             // if (Volume >= AvgVolume + 0.8)
@@ -172,76 +179,122 @@ void Record(void) {
             //     }
             // }
 
-            if (releaseStop || pressStop) {
-                releaseStop = false;
-                pressStop = false;
-                break;
+            if (RECORD_BUTTON.read() <= 0) {
+                cout << "Release Stop" << endl;
+                Recording = 0;
+                return;
             }
-         
-            Audio.push_back(Volume*GainValue);
-            //sampleBufferValue = 0;
+        
+            Audio.push_back(Volume);
+            sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
         }
     }
 }
 
-void RecordRise (void) {
+void ShortPressRecord(void) {
+
+    cout << "Recording" << endl;
+    int i = 0;
+    Audio.clear();
+    while (i < 4500) {
+        millisCurrent = Kernel::get_ms_count();
+        millisCurrentRec = Kernel::get_ms_count();
+        millisElapsed = millisCurrent - millisLast;
+        millisElapsedRec = millisCurrentRec - millisLastRec;
+        if (millisElapsed >= 1) {
+            GetVolume();
+
+            // if (Volume >= AvgVolume + 0.8)
+            //     sampleBufferValue++;
+
+            // if (millisElapsedRec > SAMPLE_TIME) {
+            //     if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
+            //     sampleBufferValue = 0;
+            //     wait_us(1000000);
+            //     Recording = 0;
+            //     millisElapsedRec = 0;
+            //     millisLastRec = 0;
+            //     break;
+            //     }
+            // }
+
+            if (RECORD_BUTTON.read() > 0) {
+                cout << "Press Stop" << endl;
+                Recording = 0;
+                released = false;
+                return;
+            }
+        
+            Audio.push_back(Volume);
+            sampleBufferValue = 0;
+            millisLast = millisCurrent;
+            i++;
+        }
+    }
+}
+
+void RecordPress (void) {
+
+    cout << "Record Press" << endl;
     millisLast = Kernel::get_ms_count();
     
     while (RECORD_BUTTON.read() == 1) {
         millisCurrent = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
         if (millisElapsed > LONGPRESS_TIME) {
-            longPress = true;
-            Record();
+            cout << "Longpress" << endl;
+            Recording = 1;
+            LongPressRecord();
+            Recording = 0;
+            cout << "Long Press Recording Finished" << endl;
+            released = false;
             return;
         }
     }
 
-    shortPress = true;
-    Record();
-}
-
-void RecordFall (void) {
-    if (longPress) {
-        releaseStop = true;
-        longPress = false;
-    }
+    cout << "Shortpress" << endl;
+    Recording = 1;
+    ShortPressRecord();
+    Recording = 0;
+    cout << "Short Press Recording Finished" << endl;
 }
 
 int main(void)
 {
-    EventQueue event_queue;
-    Thread event_thread(osPriorityNormal);
-    event_thread.start(callback(&event_queue, &EventQueue::dispatch_forever));
 
-    Play.rise(event_queue.event(&PlayBack));
-    Graph.rise(event_queue.event(&Draw));
+Play.rise(event_queue.event(&PlayBack));
+Graph.rise(event_queue.event(&Draw));
 
- RECORD_BUTTON.rise(event_queue.event(&RecordRise));
- RECORD_BUTTON.fall(event_queue.event(&RecordFall));
- 
  while(true) {
+
+     if (RECORD_BUTTON.read() == 0)
+        released = true;
+
+     if (RECORD_BUTTON.read() > 0 && released)
+         RecordPress();
+
      Speaker = 0;
      millisCurrent = Kernel::get_ms_count();
      millisElapsed = millisCurrent - millisLast;
 
-     GetVolume();
-     if (Volume >= AvgVolume + 0.8)
-        sampleBufferValue++;
+    //  GetVolume();
+    //  if (Volume >= AvgVolume + 0.8)
+    //     sampleBufferValue++;
 
-     if (millisElapsed > SAMPLE_TIME) {
-         if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
-             sampleBufferValue = 0;
-             wait_us(1000000);
-             Recording = 1;
-             Record();
-             Recording = 0;
-             millisLast = millisCurrent;
-         }
-         sampleBufferValue = 0;
-     }
+    //  if (millisElapsed > SAMPLE_TIME) {
+    //      if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
+    //          sampleBufferValue = 0;
+    //          wait_us(1000000);
+    //          Recording = 1;
+    //          cout << "Spike Record" << endl;
+    //          Record();
+    //          Recording = 0;
+    //          millisLast = millisCurrent;
+    //      }
+    //      sampleBufferValue = 0;
+    //  }
  }
 }
 // End of HardwareInterruptSeedCode
