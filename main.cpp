@@ -9,9 +9,6 @@
  */
  
 #include "mbed.h"
-//#include "kiss_fft.h"
-//#include <fftw3.h>
-//#include "arm_math.h" // Include CMSIS DSP library
 #include <cstdio>
 #include <iostream>
 #include <type_traits>
@@ -21,18 +18,16 @@ AnalogIn Mic(PA_0); //CN8/A0
 AnalogIn Gain(PA_1); //CN8/A1 
 AnalogIn Speed(PC_1); //CN8/A4
 
-AnalogOut Speaker(PA_4);
+AnalogOut Speaker(PA_4); //D5
 //AnalogOut Speaker(PA_1);
 
-DigitalIn RECORD_BUTTON(PA_8); //CN5/D7
-InterruptIn Play(PA_9); //CN5/D4
-InterruptIn Graph(PC_4);
+DigitalIn RECORD_BUTTON(PA_8, PullDown); //CN5/D7
+DigitalIn Play(PA_9); //CN5/D8
+DigitalIn Graph(PC_4); //D1
 
-DigitalOut OUTPUT(PB_4); //CN9/D5
-DigitalOut Recording(PB_5);
-DigitalOut Error(PA_10);
-DigitalOut leds[] = {DigitalOut(PC_7), DigitalOut(PA_6), DigitalOut(PA_7), DigitalOut(PB_6)}; // Example LED pins
-
+DigitalOut OUTPUT(PB_4); //CN9/D1
+DigitalOut Recording(PB_5); //D4
+DigitalOut Error(PA_10); //D2
  
 #define Vsupply 3.3f //microcontroller voltage supply 3.3V
 const int SAMPLE_TIME = 200;
@@ -47,31 +42,20 @@ unsigned long millisElapsedRec = 0;
 int sampleBufferValue = 0;
 float Volume;
 vector<float> Audio;
-std::vector<float> FrequencySamples; // Separate vector for frequency analysis
 float AvgVolume = 0;
 float TotalVolume = 0;
 unsigned long long VolumeIndex = 0;
 
-const int NUM_LEDS = 4;
-const int NUM_BANDS = 4; // Number of frequency bands
-
-const int BAND_FREQS[NUM_BANDS][2] = {
-    {20, 200},   // Bass frequencies
-    {200, 800},  // Midrange frequencies
-    {800, 4000}, // High-mid frequencies
-    {4000, 20000} // Treble frequencies
-};
-
 bool released = true;
 const int LONGPRESS_TIME = 2000;
+
+bool stabilize = true;
 
 float GainSensor;
 float GainValue;
 
 float SpeedSensor;
 float SpeedValue;
-
-
 
 EventQueue event_queue;
 Thread event_thread(osPriorityNormal);
@@ -113,16 +97,19 @@ void PlayBack(void) {
     }
     Error = 0;
     cout << "Playing :" << Audio.size() << endl;
-    for(int i = 0; i < Audio.size(); i++){
+
+    int i = 0;
+    while (i < Audio.size()) {
         millisCurrent = Kernel::get_ms_count();
-        millisLast = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
-        while(millisElapsed < 10){
-            millisCurrent = Kernel::get_ms_count();
+
+        if (millisElapsed >= 1) {
+            Speaker = Audio[i];
+            millisLast = millisCurrent;
+            i++;
         }
-        cout << Audio[i] << endl;
-        Speaker = Audio[i] * 10;
     }
+    cout << "Playing Finished" << endl;
 }
 
 
@@ -151,7 +138,7 @@ void Draw() {
     for(int i = 0; i < 4500; i += 20){
         total = 0;
         for (int j = i; j < (i+20); j++) {
-            total = total + Audio[j];
+            total = total + Audio[j]*Vsupply;
         }
         avg.push_back(floor((total/20)*10));
     }
@@ -170,115 +157,6 @@ void Draw() {
     }
 }
 
-/*void sampleAndPopulateFFTInput() {
-    // Perform ADC sampling and populate fft_input array
-    for (int i = 0; i < FFT_SIZE; i++) {
-        // Sample microphone input voltage and convert to digital value
-        float voltage = Mic.read() * 3.3f; // Convert normalized value to voltage (assuming Vsupply is 3.3V)
-        // Populate the real part of the complex input
-        fft_input[i][0] = voltage;
-        // Imaginary part is set to 0 for simplicity
-        fft_input[i][1] = 0;
-    }
-}
-
-
-// Function to perform FFT and update LEDs based on frequency analysis results
-void updateLEDsFromFFT() {
-    // Update our FFT input
-    sampleAndPopulateFFTInput();
-    // Perform FFT on the input signal
-    fftw_execute(fft_plan);
-
-    // Calculate magnitude of each frequency bin
-    for (int i = 0; i < FFT_SIZE; i++) {
-        fft_output[i][0] = sqrt(fft_output[i][0] * fft_output[i][0] + fft_output[i][1] * fft_output[i][1]);
-        fft_output[i][1] = 0; // Clear imaginary part
-    }
-
-    // Divide the FFT output into frequency bands and calculate energy levels
-    std::vector<float> frequency_bands(NUM_BANDS, 0.0);
-    for (int i = 0; i < NUM_BANDS; i++) {
-        int start_index = i * (FFT_SIZE / NUM_BANDS);
-        int end_index = (i + 1) * (FFT_SIZE / NUM_BANDS);
-        for (int j = start_index; j < end_index; j++) {
-            frequency_bands[i] += fft_output[j][0];
-        }
-        frequency_bands[i] /= (end_index - start_index); // Average energy level within the band
-    }
-
-    // Update LEDs based on frequency analysis results
-    for (int i = 0; i < NUM_LEDS; i++) {
-        // Calculate LED brightness based on the energy level of the corresponding frequency band
-        float energy = frequency_bands[i];
-
-        // Map energy level to LED brightness based on frequency band
-        int brightness = 0;
-        if (energy >= BAND_FREQS[i][0] && energy <= BAND_FREQS[i][1]) {
-            // Energy falls within the frequency band range
-            brightness = 1; // Set LED brightness to a non-zero value to indicate presence of energy
-        } else {
-            // Energy level is outside the frequency band range
-            brightness = 0; // Set LED brightness to 0
-        }
-
-        // Update LED brightness
-        leds[i] = brightness;
-    }
-}*/
-
-// Function to perform ADC sampling and populate the frequency samples vector
-void sampleAndPopulateFrequencySamples() {
-    // Perform ADC sampling and populate the frequency samples vector
-    Volume = Mic.read() * Vsupply; // Convert normalized value to voltage (assuming Vsupply is 3.3V)
-    FrequencySamples.push_back(Volume);
-}
-
-// Function to estimate frequency using zero-crossing detection
-float estimateFrequency() {
-    int numCrossings = 0;
-    bool aboveZero = false;
-    float frequency = 0.0;
-
-    // Iterate over the frequency samples to detect zero crossings
-    for (size_t i = 1; i < FrequencySamples.size(); i++) {
-        if (FrequencySamples[i] > 0) {
-            aboveZero = true;
-        } else if (FrequencySamples[i] < 0 && aboveZero) {
-            numCrossings++;
-            aboveZero = false;
-        }
-    }
-
-    // Calculate frequency based on zero crossings
-    if (numCrossings > 0) {
-        frequency = 0.5 * FrequencySamples.size() / numCrossings; // Sample rate divided by number of crossings
-    }
-
-    return frequency;
-}
-
-void updateLEDs(float freq) {
-    // Define frequency ranges for each LED
-    const float ranges[NUM_LEDS][2] = {
-        {20, 200},   // LED 1 (Low frequency range)
-        {200, 800},  // LED 2 (Mid frequency range)
-        {800, 4000}, // LED 3 (High frequency range)
-        {4000, 20000} // LED 4 (Very high frequency range)
-    };
-
-    // Check if the estimated frequency falls within each range and update LEDs accordingly
-    for (int i = 0; i < NUM_LEDS; i++) {
-        if (freq >= ranges[i][0] && freq <= ranges[i][1]) {
-            leds[i] = 1; // Turn on LED
-        } else {
-            leds[i] = 0; // Turn off LED
-        }
-    }
-}
-
-
-
 void LongPressRecord(void) {
 
     cout << "Recording" << endl;
@@ -286,9 +164,7 @@ void LongPressRecord(void) {
     Audio.clear();
     while (i < 4500) {
         millisCurrent = Kernel::get_ms_count();
-        millisCurrentRec = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
-        millisElapsedRec = millisCurrentRec - millisLastRec;
         if (millisElapsed >= 1) {
             GetVolume();
 
@@ -298,12 +174,13 @@ void LongPressRecord(void) {
                 return;
             }
         
-            Audio.push_back(Volume);
+            Audio.push_back(Mic.read());
             sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
         }
     }
+
 }
 
 void ShortPressRecord(void) {
@@ -313,20 +190,17 @@ void ShortPressRecord(void) {
     Audio.clear();
     while (i < 4500) {
         millisCurrent = Kernel::get_ms_count();
-        millisCurrentRec = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
-        millisElapsedRec = millisCurrentRec - millisLastRec;
         if (millisElapsed >= 1) {
             GetVolume();
 
             if (RECORD_BUTTON.read() > 0) {
                 cout << "Press Stop" << endl;
                 Recording = 0;
-                released = false;
                 return;
             }
         
-            Audio.push_back(Volume);
+            Audio.push_back(Mic.read());
             sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
@@ -347,7 +221,9 @@ void SpikeRecord(void) {
         if (millisElapsed >= 1) {
             GetVolume();
 
-            if (Volume >= AvgVolume + 0.8)
+            if (Volume < AvgVolume)
+                stabilize = true;
+            if (Volume >= 3.0 && stabilize)
                 sampleBufferValue++;
 
             if (millisElapsedRec > SAMPLE_TIME) {
@@ -362,7 +238,7 @@ void SpikeRecord(void) {
                 }
             }
         
-            Audio.push_back(Volume);
+            Audio.push_back(Mic.read());
             sampleBufferValue = 0;
             millisLast = millisCurrent;
             i++;
@@ -384,7 +260,6 @@ void RecordPress (void) {
             LongPressRecord();
             Recording = 0;
             cout << "Long Press Recording Finished" << endl;
-            released = false;
             return;
         }
     }
@@ -394,31 +269,40 @@ void RecordPress (void) {
     ShortPressRecord();
     Recording = 0;
     cout << "Short Press Recording Finished" << endl;
+    return;
 }
 
 int main(void)
 {
-
-event_thread.start(callback(&event_queue, &EventQueue::dispatch_forever));
-
-Play.rise(event_queue.event(&PlayBack));
-Graph.rise(event_queue.event(&Draw));
-
 
  while(true) {
 
      if (RECORD_BUTTON.read() == 0)
         released = true;
 
-     if (RECORD_BUTTON.read() > 0 && released)
+     if (RECORD_BUTTON.read() > 0 && released) {
          RecordPress();
+         released = false;
+     }
+
+     if (Graph.read() == 1) {
+         Draw();
+     }
+
+     if (Play.read() == 1) {
+         PlayBack();
+     }
 
      Speaker = 0;
      millisCurrent = Kernel::get_ms_count();
      millisElapsed = millisCurrent - millisLast;
 
      GetVolume();
-     if (Volume >= AvgVolume + 0.8)
+     if (Volume <= AvgVolume)
+        stabilize = true;
+
+
+     if (Volume > 3.0 && stabilize)
         sampleBufferValue++;
 
      if (millisElapsed > SAMPLE_TIME) {
@@ -428,25 +312,13 @@ Graph.rise(event_queue.event(&Draw));
              Recording = 1;
              cout << "Spike Record" << endl;
              SpikeRecord();
+             stabilize = false;
              Recording = 0;
              cout << "Spike Press Recording Finished" << endl;
              millisLast = millisCurrent;
          }
          sampleBufferValue = 0;
-    }
-    // Sample and populate frequency samples vector
-    sampleAndPopulateFrequencySamples();
-
-    // Estimate frequency using zero-crossing detection
-    float freq = estimateFrequency();
-
-    // Update LEDs based on frequency ranges
-    updateLEDs(freq);
-
-    // Reset the frequency samples vector for the next iteration
-    FrequencySamples.clear();
-
-    wait_us(100000); // Adjust delay as needed
-    }
+     }
+ }
 }
 // End of HardwareInterruptSeedCode
