@@ -51,7 +51,6 @@ const int LONGPRESS_TIME = 2000;
 
 bool stabilize = true;
 
-float GainSensor;
 float GainValue;
 
 float SpeedSensor;
@@ -61,12 +60,7 @@ EventQueue event_queue;
 Thread event_thread(osPriorityNormal);
 
 void GetGain (void) {
-    GainSensor = Gain.read()/2;
-    if (GainSensor > 1) {
-        GainValue = 1 + GainSensor;
-    } else {
-        GainValue = 1 - GainSensor;
-    }
+    GainValue = Gain.read()*2;
 }
 
 void GetSpeed (void) {
@@ -102,9 +96,10 @@ void PlayBack(void) {
     while (i < Audio.size()) {
         millisCurrent = Kernel::get_ms_count();
         millisElapsed = millisCurrent - millisLast;
+        GetGain();
 
         if (millisElapsed >= 1) {
-            Speaker = Audio[i];
+            Speaker = Audio[i]*GainValue;
             millisLast = millisCurrent;
             i++;
         }
