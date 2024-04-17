@@ -165,20 +165,6 @@ void LongPressRecord(void) {
         if (millisElapsed >= 1) {
             GetVolume();
 
-            // if (Volume >= AvgVolume + 0.8)
-            //     sampleBufferValue++;
-
-            // if (millisElapsedRec > SAMPLE_TIME) {
-            //     if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
-            //     sampleBufferValue = 0;
-            //     wait_us(1000000);
-            //     Recording = 0;
-            //     millisElapsedRec = 0;
-            //     millisLastRec = 0;
-            //     break;
-            //     }
-            // }
-
             if (RECORD_BUTTON.read() <= 0) {
                 cout << "Release Stop" << endl;
                 Recording = 0;
@@ -206,25 +192,47 @@ void ShortPressRecord(void) {
         if (millisElapsed >= 1) {
             GetVolume();
 
-            // if (Volume >= AvgVolume + 0.8)
-            //     sampleBufferValue++;
-
-            // if (millisElapsedRec > SAMPLE_TIME) {
-            //     if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
-            //     sampleBufferValue = 0;
-            //     wait_us(1000000);
-            //     Recording = 0;
-            //     millisElapsedRec = 0;
-            //     millisLastRec = 0;
-            //     break;
-            //     }
-            // }
-
             if (RECORD_BUTTON.read() > 0) {
                 cout << "Press Stop" << endl;
                 Recording = 0;
                 released = false;
                 return;
+            }
+        
+            Audio.push_back(Volume);
+            sampleBufferValue = 0;
+            millisLast = millisCurrent;
+            i++;
+        }
+    }
+}
+
+void SpikeRecord(void) {
+
+    cout << "Recording" << endl;
+    int i = 0;
+    Audio.clear();
+    while (i < 4500) {
+        millisCurrent = Kernel::get_ms_count();
+        millisCurrentRec = Kernel::get_ms_count();
+        millisElapsed = millisCurrent - millisLast;
+        millisElapsedRec = millisCurrentRec - millisLastRec;
+        if (millisElapsed >= 1) {
+            GetVolume();
+
+            if (Volume >= AvgVolume + 0.8)
+                sampleBufferValue++;
+
+            if (millisElapsedRec > SAMPLE_TIME) {
+                if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
+                sampleBufferValue = 0;
+                wait_us(1000000);
+                Recording = 0;
+                millisElapsedRec = 0;
+                millisLastRec = 0;
+                cout << "Spike Stop" << endl;
+                return;
+                }
             }
         
             Audio.push_back(Volume);
@@ -264,6 +272,8 @@ void RecordPress (void) {
 int main(void)
 {
 
+event_thread.start(callback(&event_queue, &EventQueue::dispatch_forever));
+
 Play.rise(event_queue.event(&PlayBack));
 Graph.rise(event_queue.event(&Draw));
 
@@ -279,22 +289,23 @@ Graph.rise(event_queue.event(&Draw));
      millisCurrent = Kernel::get_ms_count();
      millisElapsed = millisCurrent - millisLast;
 
-    //  GetVolume();
-    //  if (Volume >= AvgVolume + 0.8)
-    //     sampleBufferValue++;
+     GetVolume();
+     if (Volume >= AvgVolume + 0.8)
+        sampleBufferValue++;
 
-    //  if (millisElapsed > SAMPLE_TIME) {
-    //      if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
-    //          sampleBufferValue = 0;
-    //          wait_us(1000000);
-    //          Recording = 1;
-    //          cout << "Spike Record" << endl;
-    //          Record();
-    //          Recording = 0;
-    //          millisLast = millisCurrent;
-    //      }
-    //      sampleBufferValue = 0;
-    //  }
+     if (millisElapsed > SAMPLE_TIME) {
+         if (sampleBufferValue >= 1 && sampleBufferValue < 3) {
+             sampleBufferValue = 0;
+             wait_us(1000000);
+             Recording = 1;
+             cout << "Spike Record" << endl;
+             SpikeRecord();
+             Recording = 0;
+             cout << "Spike Press Recording Finished" << endl;
+             millisLast = millisCurrent;
+         }
+         sampleBufferValue = 0;
+     }
  }
 }
 // End of HardwareInterruptSeedCode
